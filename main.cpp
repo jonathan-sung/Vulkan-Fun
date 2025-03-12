@@ -2,15 +2,18 @@
 #include <GLFW/glfw3.h>
 
 #include <iostream>
+#include <optional>
 #include <vector>
 
-std::vector<const char *> enabledLayers = {
+std::vector<const char *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
 
-std::vector<const char *> enabledExtensions = {
+std::vector<const char *> requestedDeviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
+
+std::vector<const char *> requestedInstanceExtensions{};
 
 int main()
 {
@@ -20,9 +23,11 @@ int main()
     GLFWwindow *window = glfwCreateWindow(800, 600, "Vulkan window", nullptr, nullptr);
 
     // Vulkan Handles
-    VkInstance instance;
+    VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice logicalDevice;
+    VkDevice logicalDevice = VK_NULL_HANDLE;
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
 
     // get instance extension properties
     uint32_t extensionCount = 0;
@@ -53,6 +58,7 @@ int main()
     for (uint32_t i = 0; i < extensionCount; i++)
     {
         std::cout << "\t" << requiredExtensions[i] << std::endl;
+        requestedInstanceExtensions.push_back(requiredExtensions[i]);
     }
 
     // Set up Vulkan Instance
@@ -70,10 +76,10 @@ int main()
     instanceInfo.pNext = nullptr;
     instanceInfo.flags = 0;
     instanceInfo.pApplicationInfo = &applicationInfo;
-    instanceInfo.enabledLayerCount = 1;
-    instanceInfo.ppEnabledLayerNames = enabledLayers.data();
-    instanceInfo.enabledExtensionCount = 0;
-    instanceInfo.ppEnabledExtensionNames = enabledExtensions.data();
+    instanceInfo.enabledLayerCount = validationLayers.size();
+    instanceInfo.ppEnabledLayerNames = validationLayers.data();
+    instanceInfo.enabledExtensionCount = requestedInstanceExtensions.size();
+    instanceInfo.ppEnabledExtensionNames = requestedInstanceExtensions.data();
 
     if (vkCreateInstance(&instanceInfo, nullptr, &instance) != VK_SUCCESS)
         throw std::runtime_error("failed to create instance");
@@ -116,34 +122,55 @@ int main()
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
     std::vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
-    uint32_t chosenQueueFamilyIndex;
+    std::optional<uint32_t> chosenQueueFamilyIndex;
+    uint32_t i = 0;
+    glfwCreateWindowSurface(instance, window, nullptr, &surface);
     for (const auto &currentQueueFamilyProperties : queueFamilyProperties)
     {
-        // if (currentQueueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        VkBool32 presentationSupported;
+        vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &presentationSupported);
+        if ((currentQueueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) && presentationSupported)
+        {
+            chosenQueueFamilyIndex = i;
+            break;
+        }
     }
+    if (chosenQueueFamilyIndex.has_value())
+        std::cout << "Queue family found. Index: " << chosenQueueFamilyIndex.value() << std::endl;
+    else
+        std::cout << "queue family NOT found!" << std::endl;
 
-    // VkDeviceQueueCreateInfo queueCreateInfo{};
-    // queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    // queueCreateInfo.pNext = nullptr;
+    float queuePriority = 1.0f;
+    VkDeviceQueueCreateInfo queueCreateInfo{};
+    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueCreateInfo.pNext = nullptr;
+    queueCreateInfo.flags = 0;
+    queueCreateInfo.queueFamilyIndex = chosenQueueFamilyIndex.value();
+    queueCreateInfo.queueCount = 1;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos = { queueCreateInfo };
 
-    // VkDeviceCreateInfo deviceCreateInfo{};
-    // deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    // deviceCreateInfo.pNext = nullptr;
-    // deviceCreateInfo.flags = 0;
-    // deviceCreateInfo.queueCreateInfoCount = 1;
-    // deviceCreateInfo.pQueueCreateInfos;
-    // deviceCreateInfo.enabledLayerCount = 0;
-    // deviceCreateInfo.ppEnabledLayerNames = nullptr;
-    // deviceCreateInfo.enabledExtensionCount = 1;
-    // deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions.data();
-    // deviceCreateInfo.pEnabledFeatures = nullptr;
+    VkPhysicalDeviceFeatures deviceFeatures{};
+    VkDeviceCreateInfo deviceCreateInfo{};
+    deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    deviceCreateInfo.pNext = nullptr;
+    deviceCreateInfo.flags = 0;
+    deviceCreateInfo.queueCreateInfoCount = 1;
+    deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+    deviceCreateInfo.enabledLayerCount = 0;
+    deviceCreateInfo.ppEnabledLayerNames = nullptr;
+    deviceCreateInfo.enabledExtensionCount = 1;
+    deviceCreateInfo.ppEnabledExtensionNames = requestedDeviceExtensions.data();
+    deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 
-    // vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice);
+    vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice);
 
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
     }
+
+    vkDestroyDevice(logicalDevice, nullptr);
 
     glfwDestroyWindow(window);
 
