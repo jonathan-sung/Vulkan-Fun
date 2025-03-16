@@ -50,6 +50,7 @@ private:
     void initWindow();
     void initVulkan();
     void cleanup();
+    void processInput();
     void viewInstanceExtensions();
     void viewInstanceLayers();
     void requestGLFWInstanceExtensions();

@@ -23,6 +23,7 @@ void Game::run()
         // acquireNextImage();
         // draw();
         // present();
+        processInput();
         glfwPollEvents();
     }
 }
@@ -295,4 +296,10 @@ void Game::cleanup()
     vkDestroyCommandPool(device, commandPool, nullptr);
     vkDestroySwapchainKHR(device, swapchain, nullptr);
     vkDestroyDevice(device, nullptr);
+}
+
+void Game::processInput()
+{
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
