@@ -255,6 +255,8 @@ void Game::getSwapchainImages()
 void Game::createCommandPool()
 {
     VkCommandPoolCreateInfo commandPoolInfo{};
+    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    commandPoolInfo.queueFamilyIndex = chosenQueueFamilyIndex.value();
     vkCreateCommandPool(device, &commandPoolInfo, nullptr, &commandPool);
 }
 
@@ -290,6 +292,7 @@ void Game::present()
 
 void Game::cleanup()
 {
+    vkDestroyCommandPool(device, commandPool, nullptr);
     vkDestroySwapchainKHR(device, swapchain, nullptr);
     vkDestroyDevice(device, nullptr);
 }
