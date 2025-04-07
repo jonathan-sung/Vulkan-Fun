@@ -31,12 +31,12 @@ private:
     std::vector<VkImage> swapchainImages;
     VkCommandBuffer commandBuffer;
     VkCommandPool commandPool;
+    VkPipeline graphicsPipeline;
 
     VkSemaphore imageAvailableSemaphore;
     VkFence imageAvailableFence;
     VkSemaphore renderFinishedSemaphore;
     VkFence syncHostWithDeviceFence;
-
 
     std::vector<const char *> validationLayers = {
         "VK_LAYER_KHRONOS_validation"
@@ -49,6 +49,7 @@ private:
     std::vector<const char *> requestedInstanceExtensions{};
     void initWindow();
     void initVulkan();
+    void testing();
     void cleanup();
     void processInput();
     void viewInstanceExtensions();
@@ -62,8 +63,11 @@ private:
     void getSwapchainImages();
     void acquireNextImage();
     void createCommandPool();
+    void createCommandBuffer();
+    void createGraphicsPipeline();
     void draw();
     void present();
+    static void printImageFormatProperties(const VkPhysicalDevice &physicalDevice, VkFormat format);
 };
 
 #endif

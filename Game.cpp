@@ -1,6 +1,14 @@
 #include "Game.h"
 
+#include <bitset>
+#include <cstddef>
+#include <cstdint>
+#include <ios>
 #include <iostream>
+#include <optional>
+#include <stdexcept>
+#include <sys/types.h>
+#include <vulkan/vulkan_core.h>
 
 Game::Game()
 {
@@ -10,6 +18,7 @@ Game::Game()
 }
 Game::~Game()
 {
+    vkDeviceWaitIdle(device);
     cleanup();
     glfwTerminate();
     std::cout << "Game object successfully destroyed!" << std::endl;
@@ -17,7 +26,7 @@ Game::~Game()
 
 void Game::run()
 {
-    std::clog << "game running..." << std::endl;
+    std::clog << "Game running..." << std::endl;
     while (!glfwWindowShouldClose(window))
     {
         // acquireNextImage();
@@ -30,16 +39,101 @@ void Game::run()
 
 void Game::initVulkan()
 {
-    viewInstanceExtensions();
-    viewInstanceLayers();
-    requestGLFWInstanceExtensions();
     createInstance();
+    // createSurface();
     pickPhysicalDevice();
     viewDeviceExtensions();
     createLogicalDevice();
     createSwapchain();
-    getSwapchainImages();
+    // createImageViews();
+    // createRenderPass();
+    // createGraphicsPipeline();
+    // createFramebuffers();
     createCommandPool();
+    createCommandBuffer();
+    // createSyncObjects();
+    testing();
+}
+
+void Game::testing()
+{
+    VkBuffer buffer;
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.pNext = nullptr;
+    bufferInfo.flags = 0;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.size = 32;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // bufferInfo.queueFamilyIndexCount = 1;
+    // bufferInfo.pQueueFamilyIndices = &chosenQueueFamilyIndex.value();
+    vkCreateBuffer(device, &bufferInfo, nullptr, &buffer);
+
+    // Find memory type which can be accessed by both CPU and GPU
+    std::optional<uint32_t> chosenMemoryTypeIndex;
+    VkPhysicalDeviceMemoryProperties memoryProperties{};
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+    for (int i = 0; i < memoryProperties.memoryTypeCount; i++)
+    {
+        uint32_t requiredFlags = (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        bool hasMemoryTypeAllFlags = (bool)((memoryProperties.memoryTypes[i].propertyFlags & requiredFlags) == requiredFlags);
+
+        std::clog << "Memory Type Index " << i << ":" << std::endl;
+        std::clog << "\tFlag Bits: \t" << std::bitset<32>(memoryProperties.memoryTypes[i].propertyFlags) << std::endl;
+        std::clog << "\tIs coherent:"
+                  << ": \t" << std::boolalpha << hasMemoryTypeAllFlags << std::endl;
+        std::clog << std::endl;
+
+        if (hasMemoryTypeAllFlags)
+        {
+            chosenMemoryTypeIndex = i;
+            // break;
+        }
+    }
+
+    // Allocate memory block
+    VkMemoryAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocateInfo.allocationSize = 64; // 64 bytes to hold 16 uint32_t variables
+    allocateInfo.memoryTypeIndex = chosenMemoryTypeIndex.value();
+
+    VkDeviceMemory memoryBlock;
+
+    vkAllocateMemory(device, &allocateInfo, nullptr, &memoryBlock);
+
+    // Bind memory to buffer resource
+    VkMemoryRequirements bufferMemoryRequirements{};
+    vkGetBufferMemoryRequirements(device, buffer, &bufferMemoryRequirements);
+    std::clog << "Buffer Memory Requirements:" << std::endl;
+    std::clog << "\t Alignment: " << bufferMemoryRequirements.alignment << std::endl;
+    std::clog << "\t Size: " << bufferMemoryRequirements.size << std::endl;
+    std::clog << "\t Memory Types: \t" << std::bitset<32>(bufferMemoryRequirements.memoryTypeBits) << std::endl;
+    vkBindBufferMemory(device, buffer, memoryBlock, 0);
+
+    void *bufferAddress;
+    vkMapMemory(device, memoryBlock, 0, VK_WHOLE_SIZE, 0, &bufferAddress);
+
+    // start command buffer
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = 0;
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    vkCmdFillBuffer(commandBuffer, buffer, 0, bufferMemoryRequirements.size, 42);
+    vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+
+    vkDeviceWaitIdle(device);
+
+    std::clog << *(uint32_t *)bufferAddress << std::endl;
+
+    vkUnmapMemory(device, memoryBlock);
+    vkDestroyBuffer(device, buffer, nullptr);
+    vkFreeMemory(device, memoryBlock, nullptr);
 }
 
 void Game::initWindow()
@@ -94,6 +188,10 @@ void Game::requestGLFWInstanceExtensions()
 
 void Game::createInstance()
 {
+    // Look at instance information
+    viewInstanceExtensions();
+    viewInstanceLayers();
+    requestGLFWInstanceExtensions();
     // Set up Vulkan Instance
 
     VkApplicationInfo applicationInfo{};
@@ -176,10 +274,8 @@ void Game::createLogicalDevice()
             break;
         }
     }
-    if (chosenQueueFamilyIndex.has_value())
-        std::cout << "Queue family found. Index: " << chosenQueueFamilyIndex.value() << std::endl;
-    else
-        std::cout << "queue family NOT found!" << std::endl;
+    if (!chosenQueueFamilyIndex.has_value())
+        throw std::runtime_error("no queue available!");
 
     float queuePriority = 1.0f;
     VkDeviceQueueCreateInfo queueCreateInfo{};
@@ -213,19 +309,6 @@ void Game::createLogicalDevice()
 void Game::createSwapchain()
 {
 
-    uint32_t surfaceFormatCount;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, nullptr);
-    std::vector<VkSurfaceFormatKHR> availableSurfaceFormats(surfaceFormatCount);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, availableSurfaceFormats.data());
-
-    std::cout << "available surface formats: " << std::endl;
-    for (auto currentSurfaceFormat : availableSurfaceFormats)
-    {
-        std::cout << "\t format name: " << currentSurfaceFormat.format << std::endl;
-        std::cout << "\t color space: " << currentSurfaceFormat.format << std::endl
-                  << std::endl;
-    }
-
     // Create swapchain
     VkSwapchainCreateInfoKHR swapchainInfo{};
     swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -244,6 +327,7 @@ void Game::createSwapchain()
     swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 
     vkCreateSwapchainKHR(device, &swapchainInfo, nullptr, &swapchain);
+    getSwapchainImages();
 }
 void Game::getSwapchainImages()
 {
@@ -259,6 +343,51 @@ void Game::createCommandPool()
     commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     commandPoolInfo.queueFamilyIndex = chosenQueueFamilyIndex.value();
     vkCreateCommandPool(device, &commandPoolInfo, nullptr, &commandPool);
+}
+
+void Game::createCommandBuffer()
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandBufferCount = 1;
+    allocInfo.commandPool = commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+}
+
+void Game::createGraphicsPipeline()
+{
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBinding;
+    descriptorSetLayoutBinding.descriptorCount = 1;
+    descriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptorSetLayoutBinding.binding = 0;
+
+    VkDescriptorSetLayout descriptorSetLayout;
+    descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutInfo.bindingCount = 1;
+    descriptorSetLayoutInfo.pBindings = &descriptorSetLayoutBinding;
+    vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &descriptorSetLayout);
+
+    VkPushConstantRange pushConstantRange{};
+
+    VkPipelineLayout pipelineLayout;
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &descriptorSetLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout);
+
+    VkPipelineColorBlendStateCreateInfo colorBlendInfo{};
+    colorBlendInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+
+    VkGraphicsPipelineCreateInfo graphicsPipelineInfo{};
+    graphicsPipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    graphicsPipelineInfo.layout = pipelineLayout;
+    graphicsPipelineInfo.pColorBlendState = &colorBlendInfo;
+    vkCreateGraphicsPipelines(device, nullptr, 1, &graphicsPipelineInfo, nullptr, &graphicsPipeline);
 }
 
 void Game::acquireNextImage()
@@ -302,4 +431,16 @@ void Game::processInput()
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
+}
+
+void Game::printImageFormatProperties(const VkPhysicalDevice &physicalDevice, VkFormat format)
+{
+    VkImageFormatProperties imageFormatProperties;
+    vkGetPhysicalDeviceImageFormatProperties(physicalDevice, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 0, &imageFormatProperties);
+    std::cout << "Image Format Properties:\n";
+    std::cout << "\tMax Array Layers: " << imageFormatProperties.maxArrayLayers << std::endl;
+    std::cout << "\tMax Extent: {" << imageFormatProperties.maxExtent.width << ", " << imageFormatProperties.maxExtent.height << ", " << imageFormatProperties.maxExtent.depth << "}" << std::endl;
+    std::cout << "\tMax Mip Levels: " << imageFormatProperties.maxMipLevels << std::endl;
+    std::cout << "\tMax Resource Size: " << imageFormatProperties.maxResourceSize << " bytes, " << (imageFormatProperties.maxResourceSize / 1000) / 1000 << "MB" << std::endl;
+    std::cout << "\tMax Sample Counts: " << imageFormatProperties.sampleCounts << std::endl;
 }
